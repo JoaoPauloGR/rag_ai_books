@@ -1,0 +1,12 @@
+venv/
+
+data/chroma_db/*
+!data/chroma_db/.gitkeep
+data/books/*.pdf
+
+__pycache__/
+*.pyc
+
+.env
+*.log
+.claude/
