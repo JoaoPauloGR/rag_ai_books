@@ -1,2 +1,5 @@
+pymupdf
 chromadb
 ollama
+langchain-text-splitters
+pyyaml
