@@ -1,0 +1,5 @@
+embedding_model: nomic-embed-text
+generation_model: llama3.2:3b
+chroma_path: data/chroma_db
+chunk_size: 512
+chunk_overlap: 64
