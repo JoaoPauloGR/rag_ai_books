@@ -1,7 +1,10 @@
 import argparse
+import csv
+import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -74,6 +77,44 @@ def _check(model_name: str | None) -> tuple[str, str, bool]:
     return name, processor, passed
 
 
+_BENCHMARK_PROMPT = "Explain what a neural network is in one sentence."
+_CSV_PATH = Path(__file__).resolve().parent.parent / "docs" / "gpu_benchmarks.csv"
+_CSV_HEADER = ["timestamp", "model", "processor", "tokens_per_sec", "eval_count", "eval_duration_s"]
+
+
+def _benchmark(model_name: str, processor: str) -> None:
+    import ollama
+
+    host = os.environ.get("OLLAMA_HOST", "")
+    # OLLAMA_HOST=0.0.0.0 is a server bind address, not a valid client target
+    if not host or host.split(":")[0] in ("0.0.0.0", ""):
+        host = "http://127.0.0.1:11434"
+    client = ollama.Client(host=host)
+    response = client.generate(model=model_name, prompt=_BENCHMARK_PROMPT)
+    eval_count: int = response["eval_count"]
+    eval_duration_s: float = response["eval_duration"] / 1e9
+    tokens_per_sec: float = eval_count / eval_duration_s
+
+    print(
+        f"\nBenchmark: {tokens_per_sec:.1f} tokens/sec"
+        f"  (eval_count={eval_count}, eval_duration={eval_duration_s:.3f}s)"
+    )
+
+    write_header = not _CSV_PATH.exists() or _CSV_PATH.stat().st_size == 0
+    with _CSV_PATH.open("a", newline="") as fh:
+        writer = csv.writer(fh)
+        if write_header:
+            writer.writerow(_CSV_HEADER)
+        writer.writerow([
+            datetime.now(timezone.utc).isoformat(),
+            model_name,
+            processor,
+            round(tokens_per_sec, 2),
+            eval_count,
+            round(eval_duration_s, 3),
+        ])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Verify Ollama GPU usage.")
     parser.add_argument("--config", default="config.yaml")
@@ -87,8 +128,7 @@ def main() -> None:
     name, processor, passed = _check(model_name)
 
     if args.benchmark:
-        # Implemented in Group 3
-        print("\n--benchmark not yet implemented")
+        _benchmark(name, processor)
 
     sys.exit(0 if passed else 1)
 
