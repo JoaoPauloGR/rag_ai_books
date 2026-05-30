@@ -7,6 +7,7 @@ _REQUIRED_KEYS = [
     "chunk_size",
     "chunk_overlap",
     "collection_name",
+    "top_k",
 ]
 
 

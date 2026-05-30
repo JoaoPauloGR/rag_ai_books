@@ -4,3 +4,4 @@ chroma_path: data/chroma_db
 chunk_size: 512
 chunk_overlap: 64
 collection_name: books
+top_k: 5

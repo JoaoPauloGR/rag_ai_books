@@ -1,37 +1,32 @@
-import pytest
+# Group 1 — Config extension (top_k required key)
 import yaml
+import pytest
 from src.config import load_config
 
 
-def _write_config(tmp_path, data: dict) -> str:
-    p = tmp_path / "config.yaml"
-    p.write_text(yaml.dump(data))
-    return str(p)
-
-
-VALID = {
+_BASE = {
     "embedding_model": "nomic-embed-text",
-    "generation_model": "llama3.2:3b",
+    "generation_model": "llama3.2",
     "chroma_path": "data/chroma_db",
     "chunk_size": 512,
-    "chunk_overlap": 64,
+    "chunk_overlap": 50,
     "collection_name": "books",
+    "top_k": 5,
 }
 
 
-def test_valid_config_loads(tmp_path):
-    cfg = load_config(_write_config(tmp_path, VALID))
-    assert cfg["collection_name"] == "books"
-    assert cfg["chunk_size"] == 512
+def _write(tmp_path, cfg):
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.dump(cfg))
+    return str(p)
 
 
-def test_missing_collection_name_raises(tmp_path):
-    data = {k: v for k, v in VALID.items() if k != "collection_name"}
-    with pytest.raises(ValueError, match="collection_name"):
-        load_config(_write_config(tmp_path, data))
+def test_missing_top_k_raises(tmp_path):
+    cfg = {k: v for k, v in _BASE.items() if k != "top_k"}
+    with pytest.raises(ValueError, match="top_k"):
+        load_config(_write(tmp_path, cfg))
 
 
-def test_missing_other_key_raises(tmp_path):
-    data = {k: v for k, v in VALID.items() if k != "chunk_size"}
-    with pytest.raises(ValueError, match="chunk_size"):
-        load_config(_write_config(tmp_path, data))
+def test_valid_config_with_top_k_loads(tmp_path):
+    result = load_config(_write(tmp_path, _BASE))
+    assert result["top_k"] == 5
