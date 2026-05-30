@@ -6,6 +6,7 @@ _REQUIRED_KEYS = [
     "chroma_path",
     "chunk_size",
     "chunk_overlap",
+    "collection_name",
 ]
 
 
