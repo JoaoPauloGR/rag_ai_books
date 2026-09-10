@@ -20,6 +20,13 @@ def retrieve_chunks(
     )
 
     return [
-        {"text": doc, "source_file": meta["source_file"], "page_number": meta["page_number"]}
-        for doc, meta in zip(result["documents"][0], result["metadatas"][0])
+        {
+            "text": doc,
+            "source_file": meta["source_file"],
+            "page_number": meta["page_number"],
+            "chunk_id": chunk_id,
+        }
+        for doc, meta, chunk_id in zip(
+            result["documents"][0], result["metadatas"][0], result["ids"][0]
+        )
     ]

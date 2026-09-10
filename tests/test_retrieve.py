@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 
 _CHROMA_RESULT = {
+    "ids": [["book_a.pdf::0", "book_b.pdf::4"]],
     "documents": [["First chunk.", "Second chunk."]],
     "metadatas": [
         [
@@ -12,6 +13,8 @@ _CHROMA_RESULT = {
         ]
     ],
 }
+
+_EMPTY_RESULT = {"ids": [[]], "documents": [[]], "metadatas": [[]]}
 
 
 def _make_client(chroma_result):
@@ -33,15 +36,26 @@ def test_returns_list_of_chunk_dicts(mock_embed, mock_client_cls):
     result = retrieve_chunks("What is attention?", "nomic-embed-text", "data/chroma_db", "books", top_k=2)
 
     assert len(result) == 2
-    assert result[0] == {"text": "First chunk.", "source_file": "book_a.pdf", "page_number": 3}
-    assert result[1] == {"text": "Second chunk.", "source_file": "book_b.pdf", "page_number": 11}
+    assert result[0] == {
+        "text": "First chunk.",
+        "source_file": "book_a.pdf",
+        "page_number": 3,
+        "chunk_id": "book_a.pdf::0",
+    }
+    assert result[1] == {
+        "text": "Second chunk.",
+        "source_file": "book_b.pdf",
+        "page_number": 11,
+        "chunk_id": "book_b.pdf::4",
+    }
+    assert all(r["chunk_id"] for r in result)
 
 
 @patch("src.retrieve.chromadb.PersistentClient")
 @patch("src.retrieve.ollama.embeddings")
 def test_embeds_question_with_correct_model(mock_embed, mock_client_cls):
     mock_embed.return_value = {"embedding": [0.1]}
-    client, _ = _make_client({"documents": [[]], "metadatas": [[]]})
+    client, _ = _make_client(_EMPTY_RESULT)
     mock_client_cls.return_value = client
 
     from src.retrieve import retrieve_chunks
@@ -54,7 +68,7 @@ def test_embeds_question_with_correct_model(mock_embed, mock_client_cls):
 @patch("src.retrieve.ollama.embeddings")
 def test_queries_collection_with_top_k(mock_embed, mock_client_cls):
     mock_embed.return_value = {"embedding": [0.5]}
-    client, col = _make_client({"documents": [[]], "metadatas": [[]]})
+    client, col = _make_client(_EMPTY_RESULT)
     mock_client_cls.return_value = client
 
     from src.retrieve import retrieve_chunks
@@ -68,7 +82,7 @@ def test_queries_collection_with_top_k(mock_embed, mock_client_cls):
 @patch("src.retrieve.ollama.embeddings")
 def test_empty_result_returns_empty_list(mock_embed, mock_client_cls):
     mock_embed.return_value = {"embedding": [0.1]}
-    client, _ = _make_client({"documents": [[]], "metadatas": [[]]})
+    client, _ = _make_client(_EMPTY_RESULT)
     mock_client_cls.return_value = client
 
     from src.retrieve import retrieve_chunks

@@ -70,3 +70,16 @@ def test_all_unique_sources_printed(tmp_path, capsys):
 def test_source_citation_format(tmp_path, capsys):
     out = _run(tmp_path, _CHUNKS_UNIQUE, "Answer.", capsys)
     assert "[Source: attn.pdf, p. 5]" in out
+
+
+def test_query_ignores_chunk_id_key(tmp_path, capsys):
+    """retrieve_chunks now returns a chunk_id key; query.py must ignore it."""
+    chunks = [
+        {"text": "A.", "source_file": "attn.pdf", "page_number": 5, "chunk_id": "attn.pdf::0"},
+        {"text": "B.", "source_file": "bert.pdf", "page_number": 12, "chunk_id": "bert.pdf::3"},
+    ]
+    out = _run(tmp_path, chunks, "Answer.", capsys)
+    assert "Answer." in out
+    assert "[Source: attn.pdf, p. 5]" in out
+    assert "[Source: bert.pdf, p. 12]" in out
+    assert "chunk_id" not in out
