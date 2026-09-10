@@ -16,8 +16,22 @@ def _fake_collection_data(count=10):
 
 
 def _make_client(ids, docs, metas):
+    """Mock a collection whose .get() mirrors real chroma: ids-only when
+    include=[], and an id-filtered slice when ids=[...] is passed."""
+    by_id = {i: (d, m) for i, d, m in zip(ids, docs, metas)}
+
+    def _get(ids=None, include=None, **kw):
+        if ids is None:
+            return {"ids": list(by_id), "documents": [], "metadatas": []}
+        sel = [i for i in ids if i in by_id]
+        return {
+            "ids": sel,
+            "documents": [by_id[i][0] for i in sel],
+            "metadatas": [by_id[i][1] for i in sel],
+        }
+
     col = MagicMock()
-    col.get.return_value = {"ids": ids, "documents": docs, "metadatas": metas}
+    col.get.side_effect = _get
     client = MagicMock()
     client.get_collection.return_value = col
     return client
