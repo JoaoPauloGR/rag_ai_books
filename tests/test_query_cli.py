@@ -30,6 +30,8 @@ def _write_config(tmp_path):
         "chunk_overlap": 50,
         "collection_name": "books",
         "top_k": 3,
+        "feedback_db_path": "data/feedback.db",
+        "rewrite_followups": True,
     }
     p = tmp_path / "config.yaml"
     p.write_text(yaml.dump(cfg))

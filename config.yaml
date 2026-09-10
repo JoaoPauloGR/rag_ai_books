@@ -5,3 +5,5 @@ chunk_size: 512
 chunk_overlap: 64
 collection_name: books
 top_k: 5
+feedback_db_path: data/feedback.db
+rewrite_followups: true

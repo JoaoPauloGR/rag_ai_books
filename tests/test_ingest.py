@@ -3,8 +3,16 @@ from unittest.mock import MagicMock, patch, call
 from pathlib import Path
 
 
-def _run_main(monkeypatch, tmp_path, pdf_files=None, extra_argv=None):
-    """Helper: patch filesystem + pipeline, run main(), return captured stdout."""
+def _make_chroma_mock(existing_ids=None):
+    mock_collection = MagicMock()
+    mock_collection.get.return_value = {"ids": list(existing_ids or [])}
+    mock_client = MagicMock()
+    mock_client.get_or_create_collection.return_value = mock_collection
+    return mock_client, mock_collection
+
+
+def _run_main(monkeypatch, tmp_path, pdf_files=None, extra_argv=None, existing_ids=None):
+    """Helper: patch filesystem + pipeline, run main(), return captured mocks."""
     argv = ["ingest.py", "--dir", str(tmp_path), "--config", "config.yaml"]
     if extra_argv:
         argv += extra_argv
@@ -21,11 +29,14 @@ def _run_main(monkeypatch, tmp_path, pdf_files=None, extra_argv=None):
     pdf_files = pdf_files or ["book_a.pdf"]
     found_paths = [tmp_path / f for f in pdf_files]
 
+    mock_client, mock_collection = _make_chroma_mock(existing_ids)
+
     with patch("src.ingest.load_config", return_value=fake_cfg), \
          patch("src.ingest.Path.glob", return_value=found_paths), \
+         patch("src.ingest.chromadb.PersistentClient", return_value=mock_client), \
          patch("src.ingest.extract_pages", return_value=[{"page_number": 1, "text": "hello"}]) as mock_extract, \
          patch("src.ingest.chunk_pages", return_value=[{"text": "hello", "source_file": "book_a.pdf", "page_number": 1, "chunk_index": 0}]) as mock_chunk, \
-         patch("src.ingest.build_collection") as mock_store, \
+         patch("src.ingest.build_collection", return_value={"added": 1, "skipped": 0}) as mock_store, \
          patch("builtins.print") as mock_print:
         try:
             from src import ingest
@@ -67,13 +78,15 @@ def test_build_collection_called_once_after_all_files(monkeypatch, tmp_path):
 def test_all_chunks_accumulated_before_store(monkeypatch, tmp_path):
     """Two PDFs × 1 chunk each → build_collection receives 2 chunks."""
     chunk = {"text": "x", "source_file": "f.pdf", "page_number": 1, "chunk_index": 0}
+    mock_client, _ = _make_chroma_mock()
     with patch("src.ingest.load_config", return_value={
             "embedding_model": "m", "chroma_path": "p", "chunk_size": 512,
             "chunk_overlap": 64, "collection_name": "books"}), \
          patch("src.ingest.Path.glob", return_value=[Path("a.pdf"), Path("b.pdf")]), \
+         patch("src.ingest.chromadb.PersistentClient", return_value=mock_client), \
          patch("src.ingest.extract_pages", return_value=[{"page_number": 1, "text": "t"}]), \
          patch("src.ingest.chunk_pages", return_value=[chunk]), \
-         patch("src.ingest.build_collection") as mock_store, \
+         patch("src.ingest.build_collection", return_value={"added": 2, "skipped": 0}) as mock_store, \
          patch("builtins.print"), \
          patch("sys.argv", ["ingest.py", "--dir", ".", "--config", "config.yaml"]):
         try:
@@ -85,6 +98,73 @@ def test_all_chunks_accumulated_before_store(monkeypatch, tmp_path):
             pass
     all_chunks = mock_store.call_args[0][0]
     assert len(all_chunks) == 2
+
+
+# ---------------------------------------------------------------------------
+# Incremental ingestion
+# ---------------------------------------------------------------------------
+
+def test_second_run_skips_every_already_ingested_file(monkeypatch, tmp_path):
+    mock_extract, _, mock_store, mock_print = _run_main(
+        monkeypatch, tmp_path,
+        pdf_files=["book_a.pdf"],
+        existing_ids=["book_a.pdf::0", "book_a.pdf::1"],
+    )
+    mock_extract.assert_not_called()
+    all_chunks = mock_store.call_args[0][0]
+    assert all_chunks == []
+    _, kwargs = mock_store.call_args
+    assert kwargs["force"] is False
+    printed = [str(c.args[0]) for c in mock_print.call_args_list if c.args]
+    assert any("Skipping" in line and "book_a.pdf" in line for line in printed)
+
+
+def test_run_with_one_new_file_processes_only_that_file(monkeypatch, tmp_path):
+    mock_extract, mock_chunk, _, _ = _run_main(
+        monkeypatch, tmp_path,
+        pdf_files=["book_a.pdf", "book_b.pdf"],
+        existing_ids=["book_a.pdf::0"],
+    )
+    assert mock_extract.call_count == 1
+    extracted_path = str(mock_extract.call_args[0][0])
+    assert "book_b.pdf" in extracted_path
+
+
+def test_force_reprocesses_all_files_and_passes_force_true(monkeypatch, tmp_path):
+    mock_extract, _, mock_store, _ = _run_main(
+        monkeypatch, tmp_path,
+        pdf_files=["a.pdf", "b.pdf"],
+        extra_argv=["--force"],
+        existing_ids=["a.pdf::0"],
+    )
+    assert mock_extract.call_count == 2
+    _, kwargs = mock_store.call_args
+    assert kwargs["force"] is True
+
+
+def test_force_does_not_query_existing_collection(monkeypatch, tmp_path):
+    """With --force the fast-skip lookup is bypassed entirely."""
+    mock_client, _ = _make_chroma_mock(["a.pdf::0"])
+    fake_cfg = {
+        "embedding_model": "m", "chroma_path": "p",
+        "chunk_size": 512, "chunk_overlap": 64, "collection_name": "books",
+    }
+    with patch("src.ingest.load_config", return_value=fake_cfg), \
+         patch("src.ingest.Path.glob", return_value=[tmp_path / "a.pdf"]), \
+         patch("src.ingest.chromadb.PersistentClient", return_value=mock_client) as mock_pc, \
+         patch("src.ingest.extract_pages", return_value=[{"page_number": 1, "text": "t"}]), \
+         patch("src.ingest.chunk_pages", return_value=[{"text": "t", "source_file": "a.pdf", "page_number": 1, "chunk_index": 0}]), \
+         patch("src.ingest.build_collection", return_value={"added": 1, "skipped": 0}), \
+         patch("builtins.print"), \
+         patch("sys.argv", ["ingest.py", "--dir", str(tmp_path), "--config", "config.yaml", "--force"]):
+        try:
+            from src import ingest
+            import importlib
+            importlib.reload(ingest)
+            ingest.main()
+        except SystemExit:
+            pass
+    mock_pc.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +193,7 @@ def test_bad_pdf_is_skipped_and_does_not_abort(monkeypatch, tmp_path):
         "chunk_size": 512, "chunk_overlap": 64, "collection_name": "books",
     }
     paths = [tmp_path / "bad.pdf", tmp_path / "good.pdf"]
+    mock_client, _ = _make_chroma_mock()
 
     def extract_side_effect(path):
         if "bad" in str(path):
@@ -121,9 +202,10 @@ def test_bad_pdf_is_skipped_and_does_not_abort(monkeypatch, tmp_path):
 
     with patch("src.ingest.load_config", return_value=fake_cfg), \
          patch("src.ingest.Path.glob", return_value=paths), \
+         patch("src.ingest.chromadb.PersistentClient", return_value=mock_client), \
          patch("src.ingest.extract_pages", side_effect=extract_side_effect), \
          patch("src.ingest.chunk_pages", return_value=[{"text": "ok", "source_file": "good.pdf", "page_number": 1, "chunk_index": 0}]), \
-         patch("src.ingest.build_collection"), \
+         patch("src.ingest.build_collection", return_value={"added": 1, "skipped": 0}), \
          patch("builtins.print") as mock_print, \
          patch("sys.argv", ["ingest.py", "--dir", str(tmp_path), "--config", "config.yaml"]):
         try:
@@ -144,11 +226,13 @@ def test_exit_code_is_zero_on_success(monkeypatch, tmp_path):
         "embedding_model": "m", "chroma_path": "p",
         "chunk_size": 512, "chunk_overlap": 64, "collection_name": "books",
     }
+    mock_client, _ = _make_chroma_mock()
     with patch("src.ingest.load_config", return_value=fake_cfg), \
          patch("src.ingest.Path.glob", return_value=[tmp_path / "book.pdf"]), \
+         patch("src.ingest.chromadb.PersistentClient", return_value=mock_client), \
          patch("src.ingest.extract_pages", return_value=[{"page_number": 1, "text": "t"}]), \
          patch("src.ingest.chunk_pages", return_value=[{"text": "t", "source_file": "book.pdf", "page_number": 1, "chunk_index": 0}]), \
-         patch("src.ingest.build_collection"), \
+         patch("src.ingest.build_collection", return_value={"added": 1, "skipped": 0}), \
          patch("builtins.print"), \
          patch("sys.argv", ["ingest.py", "--dir", str(tmp_path), "--config", "config.yaml"]):
         from src import ingest

@@ -8,6 +8,8 @@ _REQUIRED_KEYS = [
     "chunk_overlap",
     "collection_name",
     "top_k",
+    "feedback_db_path",
+    "rewrite_followups",
 ]
 
 

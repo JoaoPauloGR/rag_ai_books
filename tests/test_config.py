@@ -12,6 +12,8 @@ _BASE = {
     "chunk_overlap": 50,
     "collection_name": "books",
     "top_k": 5,
+    "feedback_db_path": "data/feedback.db",
+    "rewrite_followups": True,
 }
 
 
@@ -30,3 +32,27 @@ def test_missing_top_k_raises(tmp_path):
 def test_valid_config_with_top_k_loads(tmp_path):
     result = load_config(_write(tmp_path, _BASE))
     assert result["top_k"] == 5
+
+
+def test_missing_feedback_db_path_raises(tmp_path):
+    cfg = {k: v for k, v in _BASE.items() if k != "feedback_db_path"}
+    with pytest.raises(ValueError, match="feedback_db_path"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_missing_rewrite_followups_raises(tmp_path):
+    cfg = {k: v for k, v in _BASE.items() if k != "rewrite_followups"}
+    with pytest.raises(ValueError, match="rewrite_followups"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_missing_key_message_lists_both_new_keys(tmp_path):
+    cfg = {
+        k: v
+        for k, v in _BASE.items()
+        if k not in ("feedback_db_path", "rewrite_followups")
+    }
+    with pytest.raises(ValueError) as excinfo:
+        load_config(_write(tmp_path, cfg))
+    assert "feedback_db_path" in str(excinfo.value)
+    assert "rewrite_followups" in str(excinfo.value)

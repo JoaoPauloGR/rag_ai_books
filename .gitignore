@@ -5,6 +5,7 @@ data/chroma_db/*
 !data/chroma_db/.gitkeep
 data/books/
 data/test/
+data/feedback.db
 
 __pycache__/
 *.pyc
