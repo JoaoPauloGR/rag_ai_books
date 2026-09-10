@@ -125,7 +125,12 @@ submitting feedback writes to `data/feedback.db`. Full checklist in
 
 ---
 
-## Phase 6 — Evaluation Harness
+## Phase 6 — Evaluation Harness ✅ complete
+
+**Status**: complete. Harness (`src/build_eval_set.py`, `src/evaluate.py`), the 20-question
+`eval/eval_set.json`, and the baseline row in `eval/results.md` are committed. Baseline:
+hit@k 0.70, hit@1 0.60, hit@3 0.65, MRR 0.64, ans_kw ~0.60–0.70 (llama3.2:3b /
+nomic-embed-text, 512/64, k=5). Reaching a higher hit rate is Phase 7.
 
 **Goal**: a repeatable way to measure retrieval quality.
 
