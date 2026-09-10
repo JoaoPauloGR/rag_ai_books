@@ -12,6 +12,8 @@ _CFG = {
     "generation_model": "llama3.2:3b",
     "chroma_path": "data/chroma_db",
     "collection_name": "books",
+    "chunk_size": 512,
+    "chunk_overlap": 64,
     "top_k": 5,
 }
 
@@ -157,7 +159,10 @@ def test_main_prints_table_and_summary(mock_retrieve, mock_generate, tmp_path, c
             _entry(id="q02", src="b.pdf", pages=[7]),
         ],
     )
-    argv = ["evaluate.py", "--config", "config.yaml", "--eval-set", eval_path]
+    argv = [
+        "evaluate.py", "--config", "config.yaml", "--eval-set", eval_path,
+        "--out-dir", str(tmp_path / "results"),
+    ]
     with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
         with pytest.raises(SystemExit) as exc:
             main()
@@ -176,7 +181,10 @@ def test_main_prints_table_and_summary(mock_retrieve, mock_generate, tmp_path, c
 def test_main_k_override(mock_retrieve, mock_generate, tmp_path):
     mock_retrieve.return_value = [_chunk("a.pdf", 5)]
     eval_path = _write(tmp_path, [_entry(id="q01", src="a.pdf", pages=[5])])
-    argv = ["evaluate.py", "--eval-set", eval_path, "--k", "3"]
+    argv = [
+        "evaluate.py", "--eval-set", eval_path, "--k", "3",
+        "--out-dir", str(tmp_path / "results"),
+    ]
     with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
         with pytest.raises(SystemExit):
             main()
@@ -250,7 +258,10 @@ def test_score_entry_skips_generation_by_default(mock_retrieve, mock_generate):
 def test_main_no_answer_check_skips_generation(mock_retrieve, mock_generate, tmp_path, capsys):
     mock_retrieve.return_value = [_chunk("a.pdf", 5)]
     eval_path = _write(tmp_path, [_entry(id="q01", src="a.pdf", pages=[5])])
-    argv = ["evaluate.py", "--eval-set", eval_path, "--no-answer-check"]
+    argv = [
+        "evaluate.py", "--eval-set", eval_path, "--no-answer-check",
+        "--out-dir", str(tmp_path / "results"),
+    ]
     with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
         with pytest.raises(SystemExit) as exc:
             main()
@@ -269,10 +280,80 @@ def test_main_answer_check_reports_accuracy(mock_retrieve, mock_generate, tmp_pa
         tmp_path,
         [_entry(id="q01", src="a.pdf", pages=[5], kws=["training-serving skew"])],
     )
-    argv = ["evaluate.py", "--eval-set", eval_path]
+    argv = [
+        "evaluate.py", "--eval-set", eval_path,
+        "--out-dir", str(tmp_path / "results"),
+    ]
     with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
         with pytest.raises(SystemExit) as exc:
             main()
     assert exc.value.code == 0
     mock_generate.assert_called_once()
     assert "ans_kw=1.00" in capsys.readouterr().out
+
+
+# --- results output (Group 6) -------------------------------------------
+
+@patch("src.evaluate.generate_answer", return_value="training-serving skew")
+@patch("src.evaluate.retrieve_chunks")
+def test_main_writes_json_dump_and_appends_md_row(mock_retrieve, mock_generate, tmp_path):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5, cid="a.pdf::9")]
+    eval_path = _write(
+        tmp_path,
+        [
+            _entry(id="q01", src="a.pdf", pages=[5], kws=["training-serving skew"]),
+            _entry(id="q02", src="a.pdf", pages=[5], kws=["training-serving skew"]),
+        ],
+    )
+    out_dir = tmp_path / "results"
+    argv = ["evaluate.py", "--eval-set", eval_path, "--out-dir", str(out_dir)]
+
+    def run():
+        with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 0
+
+    run()
+
+    json_files = list(out_dir.glob("*.json"))
+    assert len(json_files) == 1
+    payload = json.loads(json_files[0].read_text(encoding="utf-8"))
+    assert payload["n_questions"] == 2
+    assert payload["eval_set"] == eval_path
+    assert payload["config"]["chunk_size"] == 512
+    assert payload["config"]["k"] == 5
+    assert len(payload["per_question"]) == 2
+    assert payload["aggregate"]["answer_keyword_accuracy"] == 1.0
+
+    md_path = tmp_path / "results.md"
+    lines = md_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 3  # header + separator + 1 data row
+    assert lines[2].startswith("| ") and "llama3.2:3b / nomic-embed-text" in lines[2]
+    assert "| 512/64 |" in lines[2]
+
+    run()  # second run
+    lines = md_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 4  # header block unchanged, one more data row
+
+
+@patch("src.evaluate.generate_answer")
+@patch("src.evaluate.retrieve_chunks")
+def test_main_no_answer_check_writes_dash_in_md_row(mock_retrieve, mock_generate, tmp_path):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5)]
+    eval_path = _write(tmp_path, [_entry(id="q01", src="a.pdf", pages=[5])])
+    out_dir = tmp_path / "results"
+    argv = [
+        "evaluate.py", "--eval-set", eval_path, "--no-answer-check",
+        "--out-dir", str(out_dir),
+    ]
+    with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
+        with pytest.raises(SystemExit):
+            main()
+
+    mock_generate.assert_not_called()
+    payload = json.loads(next(out_dir.glob("*.json")).read_text(encoding="utf-8"))
+    assert "answer_keyword_accuracy" not in payload["aggregate"]
+
+    row = (tmp_path / "results.md").read_text(encoding="utf-8").strip().splitlines()[-1]
+    assert row.rstrip().endswith("| - |")

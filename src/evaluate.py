@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import chromadb.errors
@@ -150,6 +151,71 @@ def print_report(entries, results, agg, k, answer_checked=False):
     print(summary)
 
 
+_MD_HEADER = (
+    "| run (UTC) | models (gen / embed) | chunk | k | n | "
+    "hit@k | hit@1 | hit@3 | MRR | ans_kw |\n"
+    "|---|---|---|---|---|---|---|---|---|---|\n"
+)
+
+
+def write_results(results, entries, agg, cfg, k, eval_set, out_dir, answer_checked):
+    """Persist one run.
+
+    Writes a full JSON dump at ``<out_dir>/<UTC timestamp>.json`` and appends a
+    row to the Markdown log at ``<out_dir>.md`` (with a header block when that
+    file is new). Returns ``(json_path, md_path)``.
+    """
+    by_id = {e["id"]: e for e in entries}
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    json_path = out_dir / f"{stamp.replace(':', '-')}.json"
+    md_path = out_dir.with_suffix(".md")
+
+    payload = {
+        "timestamp": stamp,
+        "config": {
+            "embedding_model": cfg["embedding_model"],
+            "generation_model": cfg["generation_model"],
+            "chunk_size": cfg["chunk_size"],
+            "chunk_overlap": cfg["chunk_overlap"],
+            "collection_name": cfg["collection_name"],
+            "k": k,
+        },
+        "eval_set": str(eval_set),
+        "n_questions": len(results),
+        "aggregate": agg,
+        "per_question": [
+            {
+                "id": r["id"],
+                "question": by_id[r["id"]]["question"],
+                "expected_source_file": by_id[r["id"]]["expected_source_file"],
+                "expected_pages": by_id[r["id"]]["expected_pages"],
+                "first_hit_rank": r["first_hit_rank"],
+                "answer_pass": r["answer_pass"],
+                "retrieved": r["retrieved"],
+            }
+            for r in results
+        ],
+    }
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    ans_kw = f"{agg['answer_keyword_accuracy']:.2f}" if answer_checked else "-"
+    row = (
+        f"| {stamp} | {cfg['generation_model']} / {cfg['embedding_model']} "
+        f"| {cfg['chunk_size']}/{cfg['chunk_overlap']} | {k} | {len(results)} "
+        f"| {agg['hit_rate@k']:.2f} | {agg['hit_rate@1']:.2f} "
+        f"| {agg['hit_rate@3']:.2f} | {agg['MRR']:.2f} | {ans_kw} |\n"
+    )
+    if not md_path.exists():
+        md_path.write_text(_MD_HEADER, encoding="utf-8")
+    with open(md_path, "a", encoding="utf-8") as f:
+        f.write(row)
+
+    return json_path, md_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Score retrieval quality against the curated eval set."
@@ -192,6 +258,12 @@ def main():
 
     agg = aggregate(results, answer_check)
     print_report(entries, results, agg, k, answer_check)
+
+    json_path, md_path = write_results(
+        results, entries, agg, cfg, k, args.eval_set, args.out_dir, answer_check
+    )
+    print(f"\nwrote    {json_path}")
+    print(f"appended {md_path}")
 
     sys.exit(0)
 
