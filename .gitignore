@@ -7,6 +7,9 @@ data/books/
 data/test/
 data/feedback.db
 
+eval/eval_set.draft.json
+eval/results/
+
 __pycache__/
 *.pyc
 
