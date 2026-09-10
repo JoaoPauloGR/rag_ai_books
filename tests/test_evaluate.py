@@ -143,8 +143,9 @@ def test_validation_passes_for_good_set(tmp_path):
 
 # --- main() --------------------------------------------------------------
 
+@patch("src.evaluate.generate_answer", return_value="text")
 @patch("src.evaluate.retrieve_chunks")
-def test_main_prints_table_and_summary(mock_retrieve, tmp_path, capsys):
+def test_main_prints_table_and_summary(mock_retrieve, mock_generate, tmp_path, capsys):
     mock_retrieve.side_effect = [
         [_chunk("a.pdf", 5)],                       # q01 -> rank 1
         [_chunk("x.pdf", 1), _chunk("b.pdf", 7)],   # q02 -> rank 2
@@ -170,8 +171,9 @@ def test_main_prints_table_and_summary(mock_retrieve, tmp_path, capsys):
     assert "k=5" in out
 
 
+@patch("src.evaluate.generate_answer", return_value="text")
 @patch("src.evaluate.retrieve_chunks")
-def test_main_k_override(mock_retrieve, tmp_path):
+def test_main_k_override(mock_retrieve, mock_generate, tmp_path):
     mock_retrieve.return_value = [_chunk("a.pdf", 5)]
     eval_path = _write(tmp_path, [_entry(id="q01", src="a.pdf", pages=[5])])
     argv = ["evaluate.py", "--eval-set", eval_path, "--k", "3"]
@@ -191,3 +193,86 @@ def test_main_missing_collection_exits_1(mock_retrieve, tmp_path, capsys):
             main()
     assert exc.value.code == 1
     assert "not found" in capsys.readouterr().err
+
+
+# --- answer keyword check (Group 5) ---------------------------------------
+
+@patch("src.evaluate.generate_answer")
+@patch("src.evaluate.retrieve_chunks")
+def test_answer_pass_when_all_keywords_present_case_insensitive(mock_retrieve, mock_generate):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5)]
+    mock_generate.return_value = "It solves TRAINING-serving skew and enables Reuse."
+    res = score_entry(
+        _entry(src="a.pdf", pages=[5], kws=["training-serving skew", "reuse"]),
+        _CFG,
+        k=5,
+        answer_check=True,
+    )
+    assert res["answer_pass"] is True
+
+    agg = aggregate([res], answer_checked=True)
+    assert agg["answer_keyword_accuracy"] == 1.0
+
+
+@patch("src.evaluate.generate_answer")
+@patch("src.evaluate.retrieve_chunks")
+def test_answer_fail_when_one_keyword_missing(mock_retrieve, mock_generate):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5)]
+    mock_generate.return_value = "It solves training-serving skew."
+    res = score_entry(
+        _entry(src="a.pdf", pages=[5], kws=["training-serving skew", "reuse"]),
+        _CFG,
+        k=5,
+        answer_check=True,
+    )
+    assert res["answer_pass"] is False
+
+    agg = aggregate([res], answer_checked=True)
+    assert agg["answer_keyword_accuracy"] == 0.0
+
+
+def test_aggregate_omits_accuracy_key_by_default():
+    res = {"id": "q01", "first_hit_rank": 1, "answer_pass": None, "retrieved": []}
+    assert "answer_keyword_accuracy" not in aggregate([res])
+
+
+@patch("src.evaluate.generate_answer")
+@patch("src.evaluate.retrieve_chunks")
+def test_score_entry_skips_generation_by_default(mock_retrieve, mock_generate):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5)]
+    res = score_entry(_entry(src="a.pdf", pages=[5]), _CFG, k=5)
+    mock_generate.assert_not_called()
+    assert res["answer_pass"] is None
+
+
+@patch("src.evaluate.generate_answer")
+@patch("src.evaluate.retrieve_chunks")
+def test_main_no_answer_check_skips_generation(mock_retrieve, mock_generate, tmp_path, capsys):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5)]
+    eval_path = _write(tmp_path, [_entry(id="q01", src="a.pdf", pages=[5])])
+    argv = ["evaluate.py", "--eval-set", eval_path, "--no-answer-check"]
+    with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
+        with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 0
+    mock_generate.assert_not_called()
+    out = capsys.readouterr().out
+    assert "ans_kw" not in out
+
+
+@patch("src.evaluate.generate_answer")
+@patch("src.evaluate.retrieve_chunks")
+def test_main_answer_check_reports_accuracy(mock_retrieve, mock_generate, tmp_path, capsys):
+    mock_retrieve.return_value = [_chunk("a.pdf", 5)]
+    mock_generate.return_value = "training-serving skew"
+    eval_path = _write(
+        tmp_path,
+        [_entry(id="q01", src="a.pdf", pages=[5], kws=["training-serving skew"])],
+    )
+    argv = ["evaluate.py", "--eval-set", eval_path]
+    with patch("src.evaluate.load_config", return_value=_CFG), patch("sys.argv", argv):
+        with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 0
+    mock_generate.assert_called_once()
+    assert "ans_kw=1.00" in capsys.readouterr().out

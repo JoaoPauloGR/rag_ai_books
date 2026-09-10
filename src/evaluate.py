@@ -8,6 +8,7 @@ import chromadb.errors
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import load_config
+from src.generate import generate_answer
 from src.retrieve import retrieve_chunks
 
 
@@ -60,11 +61,13 @@ def load_eval_set(path):
     return entries
 
 
-def score_entry(entry, cfg, k):
+def score_entry(entry, cfg, k, answer_check=False):
     """Retrieve for one question and record the rank of the first page-level hit.
 
     A hit is a retrieved chunk from the expected source file on one of the
-    expected pages.
+    expected pages. When ``answer_check`` is set, also generate an answer from
+    the retrieved chunks and record whether every ``answer_keywords`` string
+    occurs (case-insensitive substring) in it.
     """
     chunks = retrieve_chunks(
         entry["question"],
@@ -81,9 +84,19 @@ def score_entry(entry, cfg, k):
         and c["page_number"] in entry["expected_pages"]
     ]
 
+    answer_pass = None
+    if answer_check:
+        answer = generate_answer(
+            entry["question"], chunks, cfg["generation_model"]
+        )
+        answer_pass = all(
+            kw.lower() in answer.lower() for kw in entry["answer_keywords"]
+        )
+
     return {
         "id": entry["id"],
         "first_hit_rank": hits[0] if hits else None,
+        "answer_pass": answer_pass,
         "retrieved": [
             (c["chunk_id"], c["source_file"], c["page_number"]) for c in chunks
         ],
@@ -95,34 +108,46 @@ def _mean(values):
     return sum(values) / len(values) if values else 0.0
 
 
-def aggregate(results):
+def aggregate(results, answer_checked=False):
     ranks = [r["first_hit_rank"] for r in results]
-    return {
+    agg = {
         "hit_rate@k": _mean(rank is not None for rank in ranks),
         "hit_rate@1": _mean(rank == 1 for rank in ranks),
         "hit_rate@3": _mean(rank is not None and rank <= 3 for rank in ranks),
         "MRR": _mean((1 / rank) if rank else 0 for rank in ranks),
     }
+    if answer_checked:
+        agg["answer_keyword_accuracy"] = _mean(
+            bool(r["answer_pass"]) for r in results
+        )
+    return agg
 
 
-def print_report(entries, results, agg, k):
+def print_report(entries, results, agg, k, answer_checked=False):
     by_id = {e["id"]: e for e in entries}
 
-    print(f"{'id':<5} {'hit':<4} {'rank':<5} book")
-    print(f"{'-' * 5} {'-' * 4} {'-' * 5} {'-' * 4}")
+    print(f"{'id':<5} {'hit':<4} {'rank':<5} {'ans':<4} book")
+    print(f"{'-' * 5} {'-' * 4} {'-' * 5} {'-' * 4} {'-' * 4}")
     for r in results:
         rank = r["first_hit_rank"]
         hit = "Y" if rank is not None else "N"
         rank_str = str(rank) if rank is not None else "-"
+        if not answer_checked:
+            ans = "-"
+        else:
+            ans = "Y" if r["answer_pass"] else "N"
         book = by_id[r["id"]]["expected_source_file"]
-        print(f"{r['id']:<5} {hit:<4} {rank_str:<5} {book}")
+        print(f"{r['id']:<5} {hit:<4} {rank_str:<5} {ans:<4} {book}")
 
     print()
-    print(
+    summary = (
         f"k={k}  n={len(results)}  "
         f"hit@k={agg['hit_rate@k']:.2f}  hit@1={agg['hit_rate@1']:.2f}  "
         f"hit@3={agg['hit_rate@3']:.2f}  MRR={agg['MRR']:.2f}"
     )
+    if answer_checked:
+        summary += f"  ans_kw={agg['answer_keyword_accuracy']:.2f}"
+    print(summary)
 
 
 def main():
@@ -151,11 +176,12 @@ def main():
 
     cfg = load_config(args.config)
     k = args.k if args.k is not None else cfg["top_k"]
+    answer_check = not args.no_answer_check
 
     entries = load_eval_set(args.eval_set)
 
     try:
-        results = [score_entry(entry, cfg, k) for entry in entries]
+        results = [score_entry(entry, cfg, k, answer_check) for entry in entries]
     except chromadb.errors.NotFoundError:
         print(
             f"Collection '{cfg['collection_name']}' not found in '{cfg['chroma_path']}' "
@@ -164,8 +190,8 @@ def main():
         )
         sys.exit(1)
 
-    agg = aggregate(results)
-    print_report(entries, results, agg, k)
+    agg = aggregate(results, answer_check)
+    print_report(entries, results, agg, k, answer_check)
 
     sys.exit(0)
 
