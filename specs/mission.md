@@ -20,13 +20,14 @@ A local RAG pipeline that ingests any set of PDFs, embeds them using a local mod
 ## Non-goals
 
 - Multi-user support or cloud deployment
-- Web UI or external API
+- External / REST API, or any non-local hosting — Phase 5 adds a **localhost-only** chat UI (Gradio, `share=False`); nothing is exposed off the machine
+- Model training of any kind (RLHF, DPO, LoRA) — Phase 5 collects answer feedback into a local store, but training on it is out of scope
 - Real-time document streaming or web scraping
 - Support for languages other than English (primary corpus is English AI literature)
 
 ## Primary User
 
-Solo use — the developer is the only user. Optimized for a single workstation with a dedicated GPU running Windows with Ollama.
+Solo use — the developer is the only user. Optimized for a single workstation with a dedicated GPU running Windows with Ollama. Interaction is via the CLI (`src/query.py`) and, from Phase 5, a local browser chat UI (`src/app.py`) bound to `127.0.0.1`.
 
 ## Success Criteria
 

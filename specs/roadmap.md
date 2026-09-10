@@ -90,7 +90,42 @@ Phased from current proof-of-concept to a capable personal RAG system. Each phas
 
 ---
 
-## Phase 5 — Evaluation Harness
+## Phase 5 — Chat UI + Feedback Capture
+
+**Goal**: a local web chat interface, plus a feedback store that later phases can mine.
+
+- Gradio `gr.Blocks` app (`src/app.py`), localhost only, `share=False`
+- Multi-turn chat with a follow-up **query-rewriting** step before retrieval
+  (`src/rewrite.py`, toggled by `rewrite_followups` in `config.yaml`)
+- Per-answer feedback: 👍 / 👎, a free-text comment, and a "which cited sources helped"
+  checkbox per source
+- Everything logged to local SQLite (`src/feedback.py`, `feedback_db_path`): one row per
+  answered turn with the retrieval params snapshotted, one row per retrieved chunk, one
+  feedback row per turn
+- `src/query.py` CLI is kept and stays stateless
+- **Incremental ingestion** (pulled from `backlog.md`): chunk IDs become the stable
+  `source_file::chunk_index`, `ingest` skips books already in the collection, `--force`
+  rebuilds. Stable IDs are what keep the feedback log and future eval set pointing at the
+  same chunks after a re-ingest.
+
+**Done when**: `uv run python src/app.py` serves a chat that answers with citations, and
+submitting feedback writes to `data/feedback.db`. Full checklist in
+`specs/2026-09-10-phase-5-chat-ui-feedback/validation.md`.
+
+**Concepts you will learn:**
+- **Conversational RAG** — why a follow-up ("what about its downsides?") can't be embedded
+  and retrieved as-is, and how a rewrite-to-standalone step fixes it.
+- **Feedback collection vs. RLHF** — thumbs up/down is the *data* for preference learning,
+  not the training. RLHF = preference data → reward model → RL fine-tune. DPO skips the
+  reward model and consumes chosen/rejected pairs directly; this phase's schema is built
+  to export those later.
+- **Why ratings are stored next to retrieval params** — a judgement is only meaningful
+  alongside the `chunk_size` / `chunk_overlap` / `top_k` that produced the answer; Phase 7
+  tuning needs that join.
+
+---
+
+## Phase 6 — Evaluation Harness
 
 **Goal**: a repeatable way to measure retrieval quality.
 
@@ -108,7 +143,7 @@ Phased from current proof-of-concept to a capable personal RAG system. Each phas
 
 ---
 
-## Phase 6 — Chunking Tuning
+## Phase 7 — Chunking Tuning
 
 **Goal**: improve retrieval quality by experimenting with chunk parameters.
 
@@ -116,7 +151,7 @@ Phased from current proof-of-concept to a capable personal RAG system. Each phas
 - Record results in `eval/results.md`
 - Set `config.yaml` to the best-performing configuration
 
-**Done when**: hit rate on eval set improves vs. Phase 5 baseline.
+**Done when**: hit rate on eval set improves vs. Phase 6 baseline.
 
 **Concepts you will learn:**
 - **Hyperparameter search** — how to systematically explore a parameter grid rather than guessing, and how to use your eval set as the objective to optimize.
@@ -125,7 +160,7 @@ Phased from current proof-of-concept to a capable personal RAG system. Each phas
 
 ---
 
-## Phase 7 — Model Upgrade (optional)
+## Phase 8 — Model Upgrade (optional)
 
 **Goal**: evaluate a larger generation model if VRAM allows.
 
@@ -144,7 +179,8 @@ Phased from current proof-of-concept to a capable personal RAG system. Each phas
 
 ## Deferred / Out of Scope
 
-- Web UI or REST API
+- REST API or any non-local / LAN hosting (the Phase 5 chat UI is localhost-only)
 - Multi-user support
+- Model training of any kind (RLHF, DPO, LoRA) — Phase 5 only *collects* feedback
 - Document re-indexing / change detection
 - Non-PDF formats (EPUB, web pages)
