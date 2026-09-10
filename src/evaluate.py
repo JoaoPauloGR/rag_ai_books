@@ -85,6 +85,7 @@ def score_entry(entry, cfg, k, answer_check=False):
         and c["page_number"] in entry["expected_pages"]
     ]
 
+    answer = None
     answer_pass = None
     if answer_check:
         answer = generate_answer(
@@ -97,6 +98,7 @@ def score_entry(entry, cfg, k, answer_check=False):
     return {
         "id": entry["id"],
         "first_hit_rank": hits[0] if hits else None,
+        "answer": answer,
         "answer_pass": answer_pass,
         "retrieved": [
             (c["chunk_id"], c["source_file"], c["page_number"]) for c in chunks
@@ -193,6 +195,7 @@ def write_results(results, entries, agg, cfg, k, eval_set, out_dir, answer_check
                 "expected_source_file": by_id[r["id"]]["expected_source_file"],
                 "expected_pages": by_id[r["id"]]["expected_pages"],
                 "first_hit_rank": r["first_hit_rank"],
+                "answer": r["answer"],
                 "answer_pass": r["answer_pass"],
                 "retrieved": r["retrieved"],
             }

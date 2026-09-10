@@ -251,6 +251,7 @@ def test_score_entry_skips_generation_by_default(mock_retrieve, mock_generate):
     res = score_entry(_entry(src="a.pdf", pages=[5]), _CFG, k=5)
     mock_generate.assert_not_called()
     assert res["answer_pass"] is None
+    assert res["answer"] is None
 
 
 @patch("src.evaluate.generate_answer")
@@ -324,6 +325,7 @@ def test_main_writes_json_dump_and_appends_md_row(mock_retrieve, mock_generate, 
     assert payload["config"]["chunk_size"] == 512
     assert payload["config"]["k"] == 5
     assert len(payload["per_question"]) == 2
+    assert payload["per_question"][0]["answer"] == "training-serving skew"
     assert payload["aggregate"]["answer_keyword_accuracy"] == 1.0
 
     md_path = tmp_path / "results.md"
@@ -354,6 +356,7 @@ def test_main_no_answer_check_writes_dash_in_md_row(mock_retrieve, mock_generate
     mock_generate.assert_not_called()
     payload = json.loads(next(out_dir.glob("*.json")).read_text(encoding="utf-8"))
     assert "answer_keyword_accuracy" not in payload["aggregate"]
+    assert payload["per_question"][0]["answer"] is None
 
     row = (tmp_path / "results.md").read_text(encoding="utf-8").strip().splitlines()[-1]
     assert row.rstrip().endswith("| - |")
