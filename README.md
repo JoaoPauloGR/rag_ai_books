@@ -85,6 +85,30 @@ project.
 
 See `specs/2026-09-10-phase-5-chat-ui-feedback/` for the full spec.
 
+## Evaluate retrieval
+
+`eval/eval_set.json` is a committed set of hand-verified questions, each tagged with the
+source file and page(s) that answer it. `src/evaluate.py` retrieves for every question,
+records the rank of the first chunk from the expected file on an expected page, and
+(unless `--no-answer-check`) generates an answer and checks that every `answer_keywords`
+string appears in it.
+
+```bash
+uv run python src/evaluate.py                     # score the committed eval set
+uv run python src/evaluate.py --k 3 --no-answer-check   # retrieval-only, top-3
+```
+
+Each run prints a per-question table plus `hit@k / hit@1 / hit@3 / MRR / ans_kw`, appends
+one row to `eval/results.md`, and writes a full `eval/results/<timestamp>.json` dump.
+Needs a populated collection (run ingestion first) and Ollama up.
+
+To regenerate draft questions from sampled chunks (input to manual curation, never
+committed as-is):
+
+```bash
+uv run python src/build_eval_set.py --n 40        # writes eval/eval_set.draft.json
+```
+
 ## Project Structure
 
 ```
@@ -99,13 +123,19 @@ src/           Python modules
   rewrite.py     Rewrite a follow-up into a standalone query
   app.py         Gradio chat UI — localhost only, with feedback panel
   feedback.py    SQLite persistence for turns + feedback
+  build_eval_set.py  CLI — draft candidate eval questions from sampled chunks (Ollama)
+  evaluate.py    CLI — score retrieval + answer keywords against eval/eval_set.json
   check_gpu.py   GPU availability diagnostic
   config.py      Config loader
 data/books/      PDF source documents (not tracked in git)
 data/chroma_db/  Persistent vector store (not tracked in git)
 data/feedback.db SQLite feedback + turn log (not tracked in git)
 specs/           Project specs and roadmap
-eval/            Evaluation set and results (Phase 6+)
+eval/
+  eval_set.json    Curated, hand-verified question set (tracked)
+  results.md       One row per evaluation run (tracked)
+  eval_set.draft.json  build_eval_set.py output (git-ignored)
+  results/         Per-run JSON dumps (git-ignored)
 config.yaml      Model names, paths, chunk parameters, top_k, feedback_db_path, rewrite_followups
 ```
 
@@ -119,6 +149,6 @@ config.yaml      Model names, paths, chunk parameters, top_k, feedback_db_path, 
 | 3 | Multi-document ingestion | complete |
 | 4 | Source attribution in answers | complete |
 | 5 | Chat UI + feedback capture (Gradio) + incremental ingestion | in progress |
-| 6 | Evaluation harness (hit rate, MRR) | planned |
+| 6 | Evaluation harness (hit rate, MRR) | complete |
 | 7 | Chunking tuning | planned |
 | 8 | Model upgrade (optional) | planned |

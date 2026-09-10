@@ -133,6 +133,11 @@ submitting feedback writes to `data/feedback.db`. Full checklist in
 - Write `src/evaluate.py` that runs each question, checks if the expected chunk appears in top-k results, and reports hit rate and MRR
 - Baseline: record initial hit rate before any tuning
 
+**Scoring is page-level, not chunk-level** (implemented): entries carry
+`expected_source_file` + `expected_pages`, and a hit is a retrieved chunk from that
+file on one of those pages. Page numbers survive re-chunking, so the same set stays
+valid through Phase 7; `source_file::chunk_index` IDs would not.
+
 **Done when**: `python src/evaluate.py` prints a hit rate score and a per-question pass/fail table.
 
 **Concepts you will learn:**
